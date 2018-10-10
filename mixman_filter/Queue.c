@@ -15,6 +15,8 @@ Environment:
 --*/
 
 #include "driver.h"
+#include <usbioctl.h>
+#include <usb.h>
 #include "queue.tmh"
 
 #ifdef ALLOC_PRAGMA
@@ -24,7 +26,7 @@ Environment:
 NTSTATUS
 mixmanfilterQueueInitialize(
     _In_ WDFDEVICE Device
-    )
+)
 /*++
 
 Routine Description:
@@ -46,7 +48,6 @@ Return Value:
 
 --*/
 {
-    WDFQUEUE queue;
     NTSTATUS status;
     WDF_IO_QUEUE_CONFIG queueConfig;
 
@@ -58,26 +59,39 @@ Return Value:
     // other queues get dispatched here.
     //
     WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(
-         &queueConfig,
+        &queueConfig,
         WdfIoQueueDispatchParallel
-        );
+    );
 
-    queueConfig.EvtIoDeviceControl = mixmanfilterEvtIoDeviceControl;
-    queueConfig.EvtIoStop = mixmanfilterEvtIoStop;
+    queueConfig.EvtIoInternalDeviceControl = mixmanfilterEvtIoDeviceControl;
 
     status = WdfIoQueueCreate(
-                 Device,
-                 &queueConfig,
-                 WDF_NO_OBJECT_ATTRIBUTES,
-                 &queue
-                 );
+        Device,
+        &queueConfig,
+        WDF_NO_OBJECT_ATTRIBUTES,
+        WDF_NO_HANDLE
+    );
 
-    if(!NT_SUCCESS(status)) {
+    if (!NT_SUCCESS(status)) {
         TraceEvents(TRACE_LEVEL_ERROR, TRACE_QUEUE, "WdfIoQueueCreate failed %!STATUS!", status);
         return status;
     }
 
     return status;
+}
+
+VOID
+mixmanfilterCompletionRoutine(
+    IN WDFREQUEST                  Request,
+    IN WDFIOTARGET                 Target,
+    PWDF_REQUEST_COMPLETION_PARAMS CompletionParams,
+    IN WDFCONTEXT                  Context
+)
+{
+    UNREFERENCED_PARAMETER(Target);
+    UNREFERENCED_PARAMETER(Context);
+
+    WdfRequestComplete(Request, CompletionParams->IoStatus.Status);
 }
 
 VOID
@@ -87,7 +101,7 @@ mixmanfilterEvtIoDeviceControl(
     _In_ size_t OutputBufferLength,
     _In_ size_t InputBufferLength,
     _In_ ULONG IoControlCode
-    )
+)
 /*++
 
 Routine Description:
@@ -113,14 +127,53 @@ Return Value:
 
 --*/
 {
-    TraceEvents(TRACE_LEVEL_INFORMATION, 
-                TRACE_QUEUE, 
-                "%!FUNC! Queue 0x%p, Request 0x%p OutputBufferLength %d InputBufferLength %d IoControlCode %d", 
-                Queue, Request, (int) OutputBufferLength, (int) InputBufferLength, IoControlCode);
+    NTSTATUS status;
+    WDF_REQUEST_SEND_OPTIONS options;
+    WDF_REQUEST_PARAMETERS parameters;
+    PURB urb;
+    PUSB_DEFAULT_PIPE_SETUP_PACKET setupPacket;
 
-    WdfRequestComplete(Request, STATUS_SUCCESS);
+    TraceEvents(TRACE_LEVEL_INFORMATION,
+        TRACE_QUEUE,
+        "%!FUNC! Queue 0x%p, Request 0x%p OutputBufferLength %d InputBufferLength %d IoControlCode %d",
+        Queue, Request, (int)OutputBufferLength, (int)InputBufferLength, IoControlCode);
 
-    return;
+    WDF_REQUEST_SEND_OPTIONS_INIT(&options,
+        WDF_REQUEST_SEND_OPTION_SEND_AND_FORGET);
+    WDF_REQUEST_PARAMETERS_INIT(&parameters);
+
+    WdfRequestGetParameters(Request, &parameters);
+    urb = (PURB)parameters.Parameters.Others.Arg1;
+
+    WdfRequestFormatRequestUsingCurrentType(Request);
+
+    if (parameters.Parameters.Others.IoControlCode == IOCTL_INTERNAL_USB_SUBMIT_URB &&
+        (urb->UrbHeader.Function == URB_FUNCTION_CONTROL_TRANSFER_EX ||
+            urb->UrbHeader.Function == URB_FUNCTION_CONTROL_TRANSFER) &&
+            (urb->UrbControlTransfer.TransferFlags & USBD_TRANSFER_DIRECTION_IN))
+    {
+        if (urb->UrbHeader.Function == URB_FUNCTION_CONTROL_TRANSFER_EX) {
+            setupPacket = (PUSB_DEFAULT_PIPE_SETUP_PACKET)urb->UrbControlTransferEx.SetupPacket;
+        }
+        else {
+            setupPacket = (PUSB_DEFAULT_PIPE_SETUP_PACKET)urb->UrbControlTransfer.SetupPacket;
+        }
+        if (setupPacket->bmRequestType.Dir == BMREQUEST_DEVICE_TO_HOST &&
+            setupPacket->bmRequestType.Type == BMREQUEST_STANDARD &&
+            setupPacket->bmRequestType.Recipient == BMREQUEST_TO_DEVICE &&
+            setupPacket->bRequest == USB_REQUEST_GET_DESCRIPTOR) {
+            options.Flags = 0;
+            WdfRequestSetCompletionRoutine(Request,
+                mixmanfilterCompletionRoutine,
+                WDF_NO_CONTEXT);
+        }
+    }
+
+    if (!WdfRequestSend(Request, WdfDeviceGetIoTarget(WdfIoQueueGetDevice(Queue)), &options)) {
+        status = WdfRequestGetStatus(Request);
+        KdPrint(("WdfRequestSend failed: 0x%x\n", status));
+        WdfRequestComplete(Request, status);
+    }
 }
 
 VOID
@@ -152,10 +205,10 @@ Return Value:
 
 --*/
 {
-    TraceEvents(TRACE_LEVEL_INFORMATION, 
-                TRACE_QUEUE, 
-                "%!FUNC! Queue 0x%p, Request 0x%p ActionFlags %d", 
-                Queue, Request, ActionFlags);
+    TraceEvents(TRACE_LEVEL_INFORMATION,
+        TRACE_QUEUE,
+        "%!FUNC! Queue 0x%p, Request 0x%p ActionFlags %d",
+        Queue, Request, ActionFlags);
 
     //
     // In most cases, the EvtIoStop callback function completes, cancels, or postpones

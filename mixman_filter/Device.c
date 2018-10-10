@@ -7,7 +7,7 @@ Module Name:
 Abstract:
 
    This file contains the device entry points and callbacks.
-    
+
 Environment:
 
     Kernel-mode Driver Framework
@@ -24,7 +24,7 @@ Environment:
 NTSTATUS
 mixmanfilterCreateDevice(
     _Inout_ PWDFDEVICE_INIT DeviceInit
-    )
+)
 /*++
 
 Routine Description:
@@ -52,6 +52,7 @@ Return Value:
 
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&deviceAttributes, DEVICE_CONTEXT);
 
+    WdfFdoInitSetFilter(DeviceInit);
     status = WdfDeviceCreate(&DeviceInit, &deviceAttributes, &device);
 
     if (NT_SUCCESS(status)) {
@@ -71,22 +72,7 @@ Return Value:
         //
         deviceContext->PrivateDeviceData = 0;
 
-        //
-        // Create a device interface so that applications can find and talk
-        // to us.
-        //
-        status = WdfDeviceCreateDeviceInterface(
-            device,
-            &GUID_DEVINTERFACE_mixmanfilter,
-            NULL // ReferenceString
-            );
-
-        if (NT_SUCCESS(status)) {
-            //
-            // Initialize the I/O Package and any Queues
-            //
-            status = mixmanfilterQueueInitialize(device);
-        }
+        status = mixmanfilterQueueInitialize(device);
     }
 
     return status;

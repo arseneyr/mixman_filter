@@ -4,24 +4,15 @@
 
 [Version]
 Signature="$WINDOWS NT$"
-Class=Sample ; TODO: edit Class
-ClassGuid={78A1C341-4539-11d3-B88D-00C04FAD5171} ; TODO: edit ClassGuid
+Class=USBDevice
+ClassGuid={88BAE032-5A81-49f0-BC3D-A4FF138216D6}
 Provider=%ManufacturerName%
 CatalogFile=mixman_filter.cat
-DriverVer= ; TODO: set DriverVer in stampinf property pages
+DriverVer=06/16/1999,5.00.2064; TODO: set DriverVer in stampinf property pages
 
 [DestinationDirs]
 DefaultDestDir = 12
 mixman_filter_Device_CoInstaller_CopyFiles = 11
-
-; ================= Class section =====================
-
-[ClassInstall32]
-Addreg=SampleClassReg
-
-[SampleClassReg]
-HKR,,,0,%ClassName%
-HKR,,Icon,,-5
 
 [SourceDisksNames]
 1 = %DiskName%,,,""
@@ -38,7 +29,7 @@ WdfCoInstaller$KMDFCOINSTALLERVERSION$.dll=1 ; make sure the number matches with
 %ManufacturerName%=Standard,NT$ARCH$
 
 [Standard.NT$ARCH$]
-%mixman_filter.DeviceDesc%=mixman_filter_Device, Root\mixman_filter ; TODO: edit hw-id
+%mixman_filter.DeviceDesc%=mixman_filter_Device, USB\ROOT_HUB30
 
 [mixman_filter_Device.NT]
 CopyFiles=Drivers_Dir
@@ -46,9 +37,15 @@ CopyFiles=Drivers_Dir
 [Drivers_Dir]
 mixman_filter.sys
 
+[mixman_filter_Device.NT.HW]
+AddReg = mixman_filter_Device.NT.HW.AddReg
+
+[mixman_filter_Device.NT.HW.AddReg]  
+HKR,,"LowerFilters",0x00010008,"mixman_filter"
+
 ;-------------- Service installation
 [mixman_filter_Device.NT.Services]
-AddService = mixman_filter,%SPSVCINST_ASSOCSERVICE%, mixman_filter_Service_Inst
+AddService = mixman_filter,, mixman_filter_Service_Inst
 
 ; -------------- mixman_filter driver install sections
 [mixman_filter_Service_Inst]
